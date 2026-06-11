@@ -156,6 +156,10 @@ export class AstService extends Service {
       node = program.document.first?.deref();
     }
     fragments.forEach(ele => {
+      // Fragment 包装节点只被 document 的 WeakRef 链接（first/last/parent）引用，
+      // 必须加入 program.nodes 强引用，否则 GC 回收后 document.children 变空，
+      // 渲染端（FragmentComponent）拿到的 document 没有任何子节点。
+      program.nodes.push(ele);
       program.document.append(ele);
     });
     log.i(`${this.ID} did prepare ast fragment. fragments: ${fragments.length}`);
