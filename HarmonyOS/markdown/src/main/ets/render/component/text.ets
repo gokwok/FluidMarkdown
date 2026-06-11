@@ -7,6 +7,8 @@ import { Engine, BaseEngine } from '../../engine';
 import { StyledController, type StyledObject } from '../styled';
 
 const log = newLog('TextComponent');
+// 性能剖析临时打点，量完移除。
+const perf = newLog('MDPerf');
 
 @ComponentV2
 export struct TextComponent {
@@ -97,7 +99,9 @@ export struct TextComponent {
     this.sharedEngine.ctx!.textContentController()?.on(ETextComponentControllerEvent.ShouldSelectGesture, this.onCtxContentControllerShouldSelectGesture);
     this.onTextComponentBeforeAboutToAppear({});
     this.selectionOption = this.sharedEngine.event!.invokeTextSelectionOption({});
+    const setStartedAt = Date.now();
     this.styledController.setStyledString(this.content);
+    perf.i(`text ${this.ID} setStyledString cost=${Date.now() - setStartedAt}ms len=${this.content.length}`);
     this.onTextComponentAfterAboutToAppear({});
   }
   aboutToDisappear(): void {

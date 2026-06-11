@@ -6,10 +6,12 @@ import { K_COMPONENT, MDLength, IMDArea, newLog, MDMargin, MDArea } from '../../
 import { Engine, BaseEngine } from '../../engine';
 import { ITheme } from '../../theme';
 import {
-  StyledEmbed, StyledTextValue, type StyledValue,
+  Styled, StyledObject, StyledEmbed, StyledTextValue, type StyledValue,
+  EStyledObject, EStyledObjectEvent, type IStyledObjectAppendEvent,
 } from '../styled';
 import { ENode, TableItem, ETableItem } from '../../service/ast/node';
 import { EmbedComponent } from './embed';
+import { TextComponent } from './text';
 import { ContentBoxComponent, ContentBoxBar, type IContentBoxAction, IContentBoxBar } from './content-box';
 
 const log = newLog('TableComponent');
@@ -239,6 +241,7 @@ export struct TableComponent {
     }
   }
   aboutToAppear(): void {
+    const mountStartedAt = Date.now();
     this.styledEmbed.embedController.updateEmbed = embed => {
       this.styledEmbed = embed;
     };
@@ -247,6 +250,7 @@ export struct TableComponent {
     };
     this.barOption = this.sharedEngine.event!.invokeTableBarOption({ bridge: this.bridge });
     this.reload();
+    log.i(`MDPerf table ${this.ID} aboutToAppear cost=${Date.now() - mountStartedAt}ms at=${Date.now()}`);
   }
 
   build() {
@@ -304,25 +308,73 @@ export struct TableComponent {
       }, (row: DSTableRow) => row.likelyKey)
     }
   }
+  // 单元格内容绝大多数是几个字的纯样式文本：直接构建 StyledString 交给
+  // TextComponent 渲染（与 EmbedComponent 内部同一渲染方式），省掉每格一个
+  // EmbedComponent + Stack 的组件开销；含嵌入（图片等）的单元格回落旧路径。
+  // 缓存按 node 实例身份失效，reload 换 node 后会重建。
+  private ensureCellStyled(cell: DSTableCell, styles?: StyledValue[]): StyledObject {
+    const node = cell.node?.deref();
+    if (cell.styledCache !== undefined && cell.styledCacheNode === node) {
+      return cell.styledCache;
+    }
+    let hasEmbed = false;
+    const content = StyledObject.root({ width: this.theme.table?.cellMaxWidth }, styles)
+      .on<IStyledObjectAppendEvent>(EStyledObjectEvent.DidAppend, event => {
+        if (event.target.type === EStyledObject.Embed) {
+          hasEmbed = true;
+        }
+      });
+    if (node) {
+      Styled.create({ node })?.build({
+        theme: this.theme,
+        engine: this.sharedEngine,
+        didCreateStyled: (styled) => {
+          content.attach(styled);
+        },
+      });
+    }
+    cell.styledCache = content;
+    cell.styledCacheNode = node;
+    cell.styledHasEmbed = hasEmbed;
+    return content;
+  }
+  private cellNeedsEmbed(cell: DSTableCell, styles?: StyledValue[]): boolean {
+    this.ensureCellStyled(cell, styles);
+    return cell.styledHasEmbed;
+  }
+
   @Builder
   TableRow(data: ITableRowData) {
     Row() {
       ForEach(data.row.cells, (cell: DSTableCell) => {
         Row() {
           Scroll() {
-            EmbedComponent({
-              node: cell.node?.deref(),
-              area: { width: this.theme.table?.cellMaxWidth },
-              styles: data.styles,
-            })
-              .constraintSize(cell.constraintSize(this.styledEmbed.blockArea, this.theme))
-              .onAreaChange((oldValue, newValue) => {
-                if (MDArea.mdAreaEqual(MDArea.area(oldValue), MDArea.area(newValue))) {
-                  return;
-                }
-                cell.table?.deref()?.cellAreaChange(cell, oldValue, newValue);
-                // log.i(`component ${this.ID} table ${this.table.ID} Cell ${cell.likelyKey} ${cell.ID} t ${cell.table?.deref()?.ID} AreaChange (${newValue.width},${newValue.height}) ${JSON.stringify(cell.summary)}`);
+            if (this.cellNeedsEmbed(cell, data.styles)) {
+              EmbedComponent({
+                node: cell.node?.deref(),
+                area: { width: this.theme.table?.cellMaxWidth },
+                styles: data.styles,
               })
+                .constraintSize(cell.constraintSize(this.styledEmbed.blockArea, this.theme))
+                .onAreaChange((oldValue, newValue) => {
+                  if (MDArea.mdAreaEqual(MDArea.area(oldValue), MDArea.area(newValue))) {
+                    return;
+                  }
+                  cell.table?.deref()?.cellAreaChange(cell, oldValue, newValue);
+                  // log.i(`component ${this.ID} table ${this.table.ID} Cell ${cell.likelyKey} ${cell.ID} t ${cell.table?.deref()?.ID} AreaChange (${newValue.width},${newValue.height}) ${JSON.stringify(cell.summary)}`);
+                })
+            } else {
+              TextComponent({
+                content: this.ensureCellStyled(cell, data.styles),
+              })
+                .constraintSize(cell.constraintSize(this.styledEmbed.blockArea, this.theme))
+                .onAreaChange((oldValue, newValue) => {
+                  if (MDArea.mdAreaEqual(MDArea.area(oldValue), MDArea.area(newValue))) {
+                    return;
+                  }
+                  cell.table?.deref()?.cellAreaChange(cell, oldValue, newValue);
+                })
+            }
           }
           .align(Alignment.TopStart)
           .scrollable(ScrollDirection.None)
@@ -481,6 +533,11 @@ class DSTableCell {
 
   @Trace width?: Length;
   @Trace height?: Length;
+
+  // 单元格 StyledString 缓存（轻量渲染路径用），按 node 实例身份失效。
+  styledCache?: StyledObject;
+  styledCacheNode?: TableItem;
+  styledHasEmbed: boolean = false;
 
   constructor(row: DSTableRow, node?: TableItem, table?: DSTable) {
     this.row = new WeakRef(row);

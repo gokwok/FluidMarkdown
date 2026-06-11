@@ -18,6 +18,8 @@ import {
 import { type ITheme } from './theme';
 
 const log = newLog('Markdown');
+// 性能剖析临时打点，量完移除。
+const perf = newLog('MDPerf');
 
 @ComponentV2
 export struct Markdown {
@@ -64,10 +66,19 @@ export struct Markdown {
   private typingUpdateDataList: ITypingUpdateData<string>[] = [];
   private typingUpdateData?: ITypingUpdateData<string>;
 
+  private perfMountedAt: number = 0;
+
   @Monitor('area') _onMarkdownAreaChange(monitor: IMonitor) {
     const value = monitor.value<IMDArea>();
     if (MDArea.isEmpty(value?.before) && this.mode === EMarkdownMode.Normal) {
+      perf.i(`${this.ID} area ready +${Date.now() - this.perfMountedAt}ms`);
+      // parse 不依赖宽度，aboutToAppear 已提前启动；内容没变就不重复 parse。
+      if (this.parser.lastContent === this.content) {
+        return;
+      }
+      const parseStartedAt = Date.now();
       this.parser.parse(this.content).then(program => {
+        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms`);
         this.program = program;
       }).catch((e: Error) => {
         log.w(`${this.ID} can not parse content after area not empty. parse failed: ${e?.message}`)
@@ -187,6 +198,8 @@ export struct Markdown {
   }
 
   aboutToAppear(): void {
+    this.perfMountedAt = Date.now();
+    perf.i(`${this.ID} mounted at=${this.perfMountedAt}`);
     log.i(`${this.ID} before aboutToAppear`);
     this.onMarkdownBeforeAboutToAppear({});
     this.engine.ctx!.ctx = this.getUIContext();
@@ -214,8 +227,12 @@ export struct Markdown {
     this.engine.event!.onCodeComponentBarOption = event => {
       return this.onMarkdownCodeComponentContentBoxBar({ codeEvent: event });
     };
-    if (!MDArea.isEmpty(this.area)) {
+    // parse 与 area 解耦：AST 解析不依赖布局宽度，挂载即开始，
+    // area 只用于门住渲染（build 里 area 为空时仍只渲染量宽 Row）。
+    if (this.mode === EMarkdownMode.Normal || !MDArea.isEmpty(this.area)) {
+      const parseStartedAt = Date.now();
       this.parser.parse(this.content).then(program => {
+        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms (eager)`);
         this.program = program;
       }).catch((e: Error) => {
         log.w(`${this.ID} can not parse content while aboutToAppear. parse failed: ${e?.message}`);

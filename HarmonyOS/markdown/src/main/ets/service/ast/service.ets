@@ -22,16 +22,11 @@ interface IResult {
   content?: string;
 }
 
-export class AstService extends Service {
-  private static gid: number = 0;
-  readonly ID: number = AstService.gid++;
-  readonly type: EService = EService.AST;
-  private tail: Promise<IResult | void> = Promise.resolve();
-  private count: number = 0;
-  private plugins: AstServicePlugin[] = [];
-  private markdown_it: MarkdownIt;
-  constructor(engine?: Engine) {
-    super(engine);
+// markdown-it 构造（含 katex/emoji/footnote 插件注册与正则编译）约 10ms，
+// parse 同步且无跨调用状态，全部实例共享一份即可。
+let sharedMarkdownIt: MarkdownIt | undefined;
+function obtainSharedMarkdownIt(): MarkdownIt {
+  if (!sharedMarkdownIt) {
     const markdown_it = new markdown() as MarkdownIt;
     markdown_it.set({ html: true });
     markdown_it.disable(['html_block']);  // only support inline html
@@ -46,7 +41,22 @@ export class AstService extends Service {
 
     markdown_it.use<IPluginTaskListOption>(plugin_taskList, { enabled: true });
     markdown_it.use<IPluginKatexOption>(plugin_katex, { throwOnError: false });
-    this.markdown_it = markdown_it;
+    sharedMarkdownIt = markdown_it;
+  }
+  return sharedMarkdownIt;
+}
+
+export class AstService extends Service {
+  private static gid: number = 0;
+  readonly ID: number = AstService.gid++;
+  readonly type: EService = EService.AST;
+  private tail: Promise<IResult | void> = Promise.resolve();
+  private count: number = 0;
+  private plugins: AstServicePlugin[] = [];
+  private markdown_it: MarkdownIt;
+  constructor(engine?: Engine) {
+    super(engine);
+    this.markdown_it = obtainSharedMarkdownIt();
   }
   add<T extends Plugin = AstServicePlugin>(plugin: T): void {
     if (plugin instanceof AstServicePlugin) {

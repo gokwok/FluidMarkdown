@@ -19,6 +19,8 @@ import {
 } from '../typing';
 
 const log = newLog('EmbedComponent');
+// 性能剖析临时打点，量完移除。
+const perf = newLog('MDPerf');
 
 @ComponentV2
 export struct EmbedComponent {
@@ -80,6 +82,7 @@ export struct EmbedComponent {
     if (!node) {
       return;
     }
+    const attachStartedAt = Date.now();
     this.layers = [];
     const content = StyledObject.root(this.area, this.styles)
       .on<IStyledObjectAppendEvent>(EStyledObjectEvent.DidAppend, event => {
@@ -102,6 +105,7 @@ export struct EmbedComponent {
       },
     });
     this.content = content;
+    perf.i(`embed ${this.ID} attach4normal cost=${Date.now() - attachStartedAt}ms layers=${this.layers.length} len=${content.length}`);
   }
   private attach4update(mode: ETypingMode, node?: Node) {
     if (!node) {
