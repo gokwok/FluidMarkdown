@@ -19,37 +19,43 @@ export struct ContentBoxComponent {
   aboutToAppear(): void {
   }
 
+  private hasBar(): boolean {
+    return !!((this.bar.title?.length ?? 0) > 0 || (this.bar.actions?.length ?? 0) > 0);
+  }
+
   build() {
     Column() {
-      //  bar
-      Row() {
-        Text(this.bar.title)
-          .fontColor(this.theme.contentBox?.barFont?.fontColor)
-          .fontSize(this.theme.contentBox?.barFont?.fontSize?.value)
-          .fontWeight(this.theme.contentBox?.barFont?.fontWeight)
-          .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
+      if (this.hasBar()) {
+        //  bar
         Row() {
-          ForEach(this.bar.actions ?? [], (action: IContentBoxAction) => {
-            Image(action.icon)
-              .width(MDLength.metrics2length(this.theme.contentBox?.barActionIconWidth ?? MDLength.vp(0)))
-              .height(MDLength.metrics2length(this.theme.contentBox?.barActionIconHeight ?? MDLength.vp(0)))
-              .margin({ left: 10 })
-              .onClick(event => this.onActionClick?.(action, event))
-          })
+          Text(this.bar.title)
+            .fontColor(this.theme.contentBox?.barFont?.fontColor)
+            .fontSize(this.theme.contentBox?.barFont?.fontSize?.value)
+            .fontWeight(this.theme.contentBox?.barFont?.fontWeight)
+            .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
+          Row() {
+            ForEach(this.bar.actions ?? [], (action: IContentBoxAction) => {
+              Image(action.icon)
+                .width(MDLength.metrics2length(this.theme.contentBox?.barActionIconWidth ?? MDLength.vp(0)))
+                .height(MDLength.metrics2length(this.theme.contentBox?.barActionIconHeight ?? MDLength.vp(0)))
+                .margin({ left: 10 })
+                .onClick(event => this.onActionClick?.(action, event))
+            })
+          }
+          .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
+          .justifyContent(FlexAlign.SpaceBetween)
         }
-        .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
+        .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
+        .backgroundColor(this.theme.contentBox?.barBackgroundColor)
+        .border({
+          radius: {
+            topLeft: this.theme.contentBox?.border?.radius?.value ? this.theme.contentBox?.border?.radius?.value - 1 : undefined,
+            topRight: this.theme.contentBox?.border?.radius?.value ? this.theme.contentBox?.border?.radius?.value - 1 : undefined,
+          },
+        })
+        .clip(true)
       }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceBetween)
-      .backgroundColor(this.theme.contentBox?.barBackgroundColor)
-      .border({
-        radius: {
-          topLeft: this.theme.contentBox?.border?.radius?.value ? this.theme.contentBox?.border?.radius?.value - 1 : undefined,
-          topRight: this.theme.contentBox?.border?.radius?.value ? this.theme.contentBox?.border?.radius?.value - 1 : undefined,
-        },
-      })
-      .clip(true)
 
       //  content
       Scroll(this.scroller) {

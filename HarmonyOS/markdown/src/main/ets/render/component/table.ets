@@ -250,22 +250,28 @@ export struct TableComponent {
   }
 
   build() {
-    ContentBoxComponent({
-      content: () => { this.TableContent() },
-      bar: {
-        title: this.barOption?.title ?? '表格',
-        actions: this.barOption?.actions ?? [
-          // ContentBoxBar.copyAction(undefined, this.sharedEngine),
-          ContentBoxBar.openAction(undefined, this.sharedEngine),
-        ],
-      },
-      onActionClick: (action, event) => {
-        this.sharedEngine.event!.invokeTableActionClick({
-          bridge: this.bridge,
-          action, event,
-        });
-      },
-    })
+    Column() {
+      Row()
+        .width('100%')
+        .height(20)
+      ContentBoxComponent({
+        content: () => { this.TableContent() },
+        bar: {
+          title: this.barOption?.title ?? '表格',
+          actions: this.barOption?.actions ?? [
+            // ContentBoxBar.copyAction(undefined, this.sharedEngine),
+            ContentBoxBar.openAction(undefined, this.sharedEngine),
+          ],
+        },
+        onActionClick: (action, event) => {
+          this.sharedEngine.event!.invokeTableActionClick({
+            bridge: this.bridge,
+            action, event,
+          });
+        },
+      })
+        .width('100%')
+    }
       .position(this.styledEmbed?.position)
       .onAreaChange((oldValue, newValue) => {
         this.currentArea = MDArea.area(newValue);
