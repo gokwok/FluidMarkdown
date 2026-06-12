@@ -9,6 +9,7 @@ import { Element, isTag, Node, NodeWithChildren } from './domhandler';
 import { EService, Service } from '../../engine/service';
 import { Plugin } from '../../engine/plugin';
 import { StyledUtil } from './styled';
+import type { StyledValue } from '../../render/styled/styled-value';
 
 interface IVisitor {
   on: (node: AnyNode) => boolean,
@@ -23,9 +24,10 @@ export class HtmlService extends Service {
   toElement(node?: Node | null) {
     return isTag(node) ? node as Element : undefined;
   }
-  toStyled(content: string) {
+  toStyled(content: string, baseStyles?: StyledValue[]) {
     return StyledUtil.toStyled(content, {
       engine: () => this.engine?.deref(),
+      baseStyles,
     });
   }
   render(node: AnyNode) {

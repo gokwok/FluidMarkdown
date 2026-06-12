@@ -7,6 +7,7 @@ import { EService, Service } from '../../engine/service';
 import { Plugin } from '../../engine/plugin';
 import { HIGHLIGHT_DEFAULT_CSS } from './style';
 import { type CssNode  } from '../css';
+import type { StyledValue } from '../../render/styled/styled-value';
 
 export class CodeService extends Service {
   private _css?: CssNode;
@@ -33,7 +34,7 @@ export class CodeService extends Service {
     }
     return this._css;
   }
-  styledFromHtml(content: string): StyledString | undefined {
-    return this.engine?.deref()?.html?.toStyled(content);
+  styledFromHtml(content: string, baseStyles?: StyledValue[]): StyledString | undefined {
+    return this.engine?.deref()?.html?.toStyled(content, baseStyles);
   }
 }

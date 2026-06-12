@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import { StyledObject } from '../../render';
+import type { StyledValue } from '../../render';
 import { AnyNode, Element, Document, Text, isTag } from './domhandler';
 import { parseDocument } from './htmlparser2';
 import type { Engine } from '../../engine';
@@ -10,6 +11,8 @@ import type { Engine } from '../../engine';
 type StyledResult = StyledString | undefined;
 interface IStyledUtil {
   engine: () => Engine | undefined;
+  /** 叶子文本的基础样式；元素自身的内联 CSS 样式优先于它。 */
+  baseStyles?: StyledValue[];
 }
 interface IStyledUtilFrom extends IStyledUtil {
   didCreateStyled: (styled: StyledObject) => void;
@@ -21,6 +24,7 @@ export abstract class StyledUtil {
       const root = StyledObject.root();
       fromNode(document, {
         engine: option.engine,
+        baseStyles: option.baseStyles,
         didCreateStyled: (styled) => {
           root.attach(styled);
         },
@@ -46,13 +50,14 @@ const fromDocument = (document: Document, option: IStyledUtilFrom): void => {
 
   document.children.forEach(ele => fromNode(ele, {
     engine: option.engine,
+    baseStyles: option.baseStyles,
     didCreateStyled: (_styled) => {
       styled.attach(_styled);
     },
   }));
 }
 const fromText = (text: Text, option: IStyledUtilFrom): void => {
-  option.didCreateStyled(StyledObject.text(text.data));
+  option.didCreateStyled(StyledObject.text(text.data, option.baseStyles));
 }
 const fromElement = (element: Element, option: IStyledUtilFrom): void => {
   const values = option.engine()?.css?.toStyled(element.attribs['style'] || '');
@@ -61,6 +66,7 @@ const fromElement = (element: Element, option: IStyledUtilFrom): void => {
 
   element.children.forEach(ele => fromNode(ele, {
     engine: option.engine,
+    baseStyles: option.baseStyles,
     didCreateStyled: (_styled) => {
       styled.attach(_styled);
     },

@@ -8,7 +8,7 @@ import { ITheme } from '../../theme';
 import { StyledEmbed } from '../styled';
 import { ENode, Code } from '../../service/ast/node';
 import { EmbedComponent } from './embed';
-import { ContentBoxComponent, ContentBoxBar, type IContentBoxAction, IContentBoxBar } from './content-box';
+import { ContentBoxComponent, ContentBoxBar, ContentBoxEmptyActions, type IContentBoxAction, IContentBoxBar } from './content-box';
 
 const log = newLog('CodeComponent');
 
@@ -58,19 +58,30 @@ export struct CodeComponent {
   }
 
   build() {
-    ContentBoxComponent({
-      content: () => { this.CodeContent() },
-      bar: {
-        title: this.node?.language || '',
-        actions: this.barOption?.actions ?? [
-          ContentBoxBar.copyAction(undefined, this.sharedEngine),
-          // ContentBoxBar.openAction(undefined, this.sharedEngine),
-        ],
-      },
-      onActionClick: (action, event) => {
-        this.sharedEngine.event!.invokeCodeActionClick({ bridge: this.bridge, action, event });
-      },
-    })
+    Column() {
+      // 抵消 StyledEmbed 渲染时 y 上提 blockSpace 的偏移（与 TableComponent 的
+      // 顶部 spacer 同理），否则代码块会紧贴上一段文本；多出的部分让块上方
+      // 留白与块下方（blockSpace + 行高余量）视觉对称。
+      Row()
+        .width('100%')
+        .height(25)
+      ContentBoxComponent({
+        content: () => { this.CodeContent() },
+        bar: {
+          title: this.node?.language || '',
+          actions: this.barOption?.actions ?? [
+            ContentBoxBar.copyAction(undefined, this.sharedEngine),
+            // ContentBoxBar.openAction(undefined, this.sharedEngine),
+          ],
+        },
+        hasCustomActions: this.barOption?.actionsBuilder !== undefined,
+        actionsBuilder: this.barOption?.actionsBuilder ?? ContentBoxEmptyActions,
+        onActionClick: (action, event) => {
+          this.sharedEngine.event!.invokeCodeActionClick({ bridge: this.bridge, action, event });
+        },
+      })
+        .width('100%')
+    }
       .position(this.styledEmbed?.position)
       .onAreaChange((oldValue, newValue) => {
         this.currentArea = MDArea.area(newValue);

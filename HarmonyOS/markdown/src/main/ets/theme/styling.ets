@@ -61,7 +61,12 @@ export interface QuoteStyling extends IStyling {
   edgeWidth?: LengthMetrics;
   edgeColor?: ResourceColor;
 }
-export interface CodeStyling extends IStyling {}
+export interface CodeStyling extends IStyling {
+  /** 代码块正文的基础字体（族/字号/颜色），高亮 span 的内联样式优先于它。 */
+  font?: IStyledTextValue;
+  /** 是否启用语法高亮着色，默认 true；false 时正文统一使用 font 样式。 */
+  highlight?: boolean;
+}
 export interface TableStyling extends IStyling {
   headerFont?: IStyledTextValue;
   headerBackgroundColor?: ResourceColor;
@@ -146,8 +151,12 @@ export interface InlineCodeStyling extends IStyling {
 }
 export interface ContentBoxStyling extends IStyling {
   barMargin?: IMDMargin;
+  /** bar 行容器自身的额外内边距（独立于 barMargin，后者被表格单元格等复用）。 */
+  barPadding?: IMDMargin;
   barFont?: IStyledTextValue;
   barBackgroundColor?: ResourceColor;
+  /** 整个内容盒（含 bar 与正文）的底色，未设置时透明。 */
+  backgroundColor?: ResourceColor;
   barActionIconWidth?: LengthMetrics;
   barActionIconHeight?: LengthMetrics;
   headerFont?: IStyledTextValue;

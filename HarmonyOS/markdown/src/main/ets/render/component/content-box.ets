@@ -7,10 +7,18 @@ import { Engine } from '../../engine';
 import { ITheme } from '../../theme';
 import { image } from '@kit.ImageKit';
 
+@Builder
+export function ContentBoxEmptyActions() {
+}
+
 @ComponentV2
 export struct ContentBoxComponent {
   @Consumer(K_COMPONENT.THEME) theme: ITheme = {};
   @BuilderParam content: () => void;
+  // 宿主可注入自定义动作区（如带 hover/tooltip/复制反馈的按钮），
+  // hasCustomActions 为 true 时优先于 bar.actions 图标列表。
+  @BuilderParam actionsBuilder: () => void = ContentBoxEmptyActions;
+  @Param hasCustomActions: boolean = false;
   @Require @Param bar: IContentBoxBar;
   @Event onActionClick?: (action: IContentBoxAction, event: ClickEvent) => void = undefined;
 
@@ -20,7 +28,7 @@ export struct ContentBoxComponent {
   }
 
   private hasBar(): boolean {
-    return !!((this.bar.title?.length ?? 0) > 0 || (this.bar.actions?.length ?? 0) > 0);
+    return !!((this.bar.title?.length ?? 0) > 0 || (this.bar.actions?.length ?? 0) > 0 || this.hasCustomActions);
   }
 
   build() {
@@ -34,19 +42,24 @@ export struct ContentBoxComponent {
             .fontWeight(this.theme.contentBox?.barFont?.fontWeight)
             .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
           Row() {
-            ForEach(this.bar.actions ?? [], (action: IContentBoxAction) => {
-              Image(action.icon)
-                .width(MDLength.metrics2length(this.theme.contentBox?.barActionIconWidth ?? MDLength.vp(0)))
-                .height(MDLength.metrics2length(this.theme.contentBox?.barActionIconHeight ?? MDLength.vp(0)))
-                .margin({ left: 10 })
-                .onClick(event => this.onActionClick?.(action, event))
-            })
+            if (this.hasCustomActions) {
+              this.actionsBuilder()
+            } else {
+              ForEach(this.bar.actions ?? [], (action: IContentBoxAction) => {
+                Image(action.icon)
+                  .width(MDLength.metrics2length(this.theme.contentBox?.barActionIconWidth ?? MDLength.vp(0)))
+                  .height(MDLength.metrics2length(this.theme.contentBox?.barActionIconHeight ?? MDLength.vp(0)))
+                  .margin({ left: 10 })
+                  .onClick(event => this.onActionClick?.(action, event))
+              })
+            }
           }
           .margin(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
           .justifyContent(FlexAlign.SpaceBetween)
         }
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
+        .padding(this.theme.contentBox?.barPadding ? MDMargin.lengthMargin(this.theme.contentBox?.barPadding) : undefined)
         .backgroundColor(this.theme.contentBox?.barBackgroundColor)
         .border({
           radius: {
@@ -63,6 +76,7 @@ export struct ContentBoxComponent {
       }
       .scrollable(ScrollDirection.Horizontal)
     }
+    .backgroundColor(this.theme.contentBox?.backgroundColor)
     .border({
       width: MDLength.metrics2length(this.theme.contentBox?.border?.width ?? MDLength.vp(0)),
       color: this.theme.contentBox?.border?.color,
@@ -75,6 +89,8 @@ export struct ContentBoxComponent {
 export interface IContentBoxBar {
   title?: string;
   actions?: IContentBoxAction[];
+  /** 自定义动作区，提供时优先于 actions 图标列表。 */
+  actionsBuilder?: () => void;
 }
 export interface IContentBoxAction {
   icon?: image.PixelMap;

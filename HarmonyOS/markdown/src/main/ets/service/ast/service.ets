@@ -8,6 +8,8 @@ import {
   type IPluginKatexOption, type IPluginTaskListOption, type Token,
 } from './markdown-it';
 import { Program, Node, ENode, ELayout, Code, StyledContent, Fragment } from './node';
+import { StyledTextValue } from '../../render/styled/styled-value';
+import type { StyledValue } from '../../render/styled/styled-value';
 import { EService, Service } from '../../engine/service';
 import { Plugin } from '../../engine/plugin';
 import type { Engine } from '../../engine';
@@ -175,6 +177,13 @@ export class AstService extends Service {
     log.i(`${this.ID} did prepare ast fragment. fragments: ${fragments.length}`);
   }
   private prepareCodeBlock(program: Program) {
+    const codeTheme = this.engine?.deref()?.theme?.theme.code;
+    const highlightEnabled = codeTheme?.highlight !== false;
+    const codeFontSize = codeTheme?.font?.fontSize?.value ?? 13;
+    // 关闭高亮时正文统一应用主题基础字体（族/字号/颜色）；
+    // 开启高亮时颜色由内联 CSS 控制，基础样式不下发以免覆盖。
+    const baseStyles: StyledValue[] | undefined =
+      !highlightEnabled && codeTheme?.font !== undefined ? [new StyledTextValue(codeTheme.font)] : undefined;
     const codes: Code[] = [];
     Node.traverse(program.document, {
       on: node => {
@@ -192,43 +201,45 @@ export class AstService extends Service {
           const html = this.engine?.deref()?.html?.parse(page);
           const css = this.engine?.deref()?.code?.css;
           if (html && css) {
-            this.engine?.deref()?.html?.traverse(html, {
-              on: htmlNode => {
-                const element = this.engine?.deref()?.html?.toElement(htmlNode);
-                if (element) {
-                  const cls = element.attribs['class']?.split(' ').filter(ele => ele.length > 0) || [];
-                  if (cls && cls.length > 0) {
-                    let style = element.attribs['style'] ? `${element.attribs['style']};` : '';
-                    CssService.findAll<Rule>(css, rule => {
-                      return rule.type === 'Rule';
-                    }).forEach(rule => {
-                      const matched = CssService.find(rule.prelude, prelude => {
-                        if (prelude.type === 'ClassSelector') {
-                          return cls.indexOf(prelude.name) !== -1;
-                        }
-                        return false;
-                      });
-                      if (matched) {
-                        CssService.findAll<Declaration>(rule.block, block => {
-                          return block.type === 'Declaration';
-                        }).forEach(declaration => {
-                          style = `${style} ${declaration.property}: ${CssService.generate(declaration.value)};`;
+            if (highlightEnabled) {
+              this.engine?.deref()?.html?.traverse(html, {
+                on: htmlNode => {
+                  const element = this.engine?.deref()?.html?.toElement(htmlNode);
+                  if (element) {
+                    const cls = element.attribs['class']?.split(' ').filter(ele => ele.length > 0) || [];
+                    if (cls && cls.length > 0) {
+                      let style = element.attribs['style'] ? `${element.attribs['style']};` : '';
+                      CssService.findAll<Rule>(css, rule => {
+                        return rule.type === 'Rule';
+                      }).forEach(rule => {
+                        const matched = CssService.find(rule.prelude, prelude => {
+                          if (prelude.type === 'ClassSelector') {
+                            return cls.indexOf(prelude.name) !== -1;
+                          }
+                          return false;
                         });
+                        if (matched) {
+                          CssService.findAll<Declaration>(rule.block, block => {
+                            return block.type === 'Declaration';
+                          }).forEach(declaration => {
+                            style = `${style} ${declaration.property}: ${CssService.generate(declaration.value)};`;
+                          });
+                        }
+                      });
+                      if (style.length > 0) {
+                        element.attribs['style'] = `${style} font-size: ${codeFontSize};`;
                       }
-                    });
-                    if (style.length > 0) {
-                      element.attribs['style'] = `${style} font-size: 13;`;
                     }
                   }
-                }
-                return true;
-              },
-            });
+                  return true;
+                },
+              });
+            }
             const adapted = this.engine?.deref()?.html?.render(html);
             if (adapted && adapted.length > 0) {
               const styled = new StyledContent();
               styled.createHash();
-              styled.styled = this.engine?.deref()?.code?.styledFromHtml(adapted);
+              styled.styled = this.engine?.deref()?.code?.styledFromHtml(adapted, baseStyles);
               program.nodes.push(styled);
               code.append(styled);
             }
