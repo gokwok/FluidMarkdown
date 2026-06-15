@@ -68,7 +68,7 @@ export abstract class Styled implements IStyled {
       const types = [
         ENode.Paragraph, ENode.Heading,
         ENode.Quote, ENode.ListItem, ENode.List,
-        ENode.Code, ENode.Table,
+        ENode.Code, ENode.Table, ENode.ThematicBreak,
       ];
       if (types.indexOf(this.node?.type) !== -1) {
         option.didCreateStyled(StyledObject.break({ styled: this }));
