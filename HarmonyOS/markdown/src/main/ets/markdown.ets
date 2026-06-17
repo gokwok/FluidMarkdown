@@ -67,6 +67,31 @@ export struct Markdown {
   private typingUpdateData?: ITypingUpdateData<string>;
 
   private perfMountedAt: number = 0;
+  private parseSequence: number = 0;
+
+  private nextParseSequence(): number {
+    this.parseSequence += 1;
+    return this.parseSequence;
+  }
+
+  private parseLatestContent(content: string, context: string): void {
+    const sequence = this.nextParseSequence();
+    const parseStartedAt = Date.now();
+    this.parser.parse(content).then((program: Program) => {
+      if (sequence !== this.parseSequence || content !== this.content) {
+        log.i(`${this.ID} skip stale parse result. context: ${context} sequence: ${sequence} latest: ${this.parseSequence}`);
+        return;
+      }
+      if (context === 'eager') {
+        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms (eager)`);
+      } else if (context === 'area') {
+        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms`);
+      }
+      this.program = program;
+    }).catch((e: Error) => {
+      log.w(`${this.ID} can not parse content for ${context}. parse failed: ${e?.message}`);
+    });
+  }
 
   @Monitor('area') _onMarkdownAreaChange(monitor: IMonitor) {
     const value = monitor.value<IMDArea>();
@@ -76,24 +101,14 @@ export struct Markdown {
       if (this.parser.lastContent === this.content) {
         return;
       }
-      const parseStartedAt = Date.now();
-      this.parser.parse(this.content).then(program => {
-        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms`);
-        this.program = program;
-      }).catch((e: Error) => {
-        log.w(`${this.ID} can not parse content after area not empty. parse failed: ${e?.message}`)
-      });
+      this.parseLatestContent(this.content, 'area');
     }
   }
   @Monitor('content') onContentChange(monitor: IMonitor) {
     const value = monitor.value<string>();
     log.i(`${this.ID} onContentChange now: ${value?.now} before: ${value?.before}`);
     if (this.mode === EMarkdownMode.Normal) {
-      this.parser.parse(value?.now || '').then(program => {
-        this.program = program;
-      }).catch((e: Error) => {
-        log.w(`${this.ID} can not parse content after content changed. parse failed: ${e?.message}`)
-      });
+      this.parseLatestContent(value?.now || '', 'content');
     }
   }
   private bindController() {
@@ -230,13 +245,7 @@ export struct Markdown {
     // parse 与 area 解耦：AST 解析不依赖布局宽度，挂载即开始，
     // area 只用于门住渲染（build 里 area 为空时仍只渲染量宽 Row）。
     if (this.mode === EMarkdownMode.Normal || !MDArea.isEmpty(this.area)) {
-      const parseStartedAt = Date.now();
-      this.parser.parse(this.content).then(program => {
-        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms (eager)`);
-        this.program = program;
-      }).catch((e: Error) => {
-        log.w(`${this.ID} can not parse content while aboutToAppear. parse failed: ${e?.message}`);
-      });
+      this.parseLatestContent(this.content, 'eager');
     }
 
     getContext(this)?.eventHub?.on(EMarkdownMainBotEvent.ScrollBegin, this.onMainBotScrollBegin);
