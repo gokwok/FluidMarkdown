@@ -13396,6 +13396,9 @@ var hljs = (function () {
     // identifiers back into the more typical dash style that we use for language
     // naming via the API
     const languageName = key.replace("grmr_", "").replace("_", "-");
+    // HarmonyOS ArkTS rejects a backreference used by the bundled Perl grammar.
+    // Skip it so importing the Markdown renderer does not emit a startup SyntaxError.
+    if (languageName === "perl") continue;
     hljs.registerLanguage(languageName, builtIns[key]);
   }
 

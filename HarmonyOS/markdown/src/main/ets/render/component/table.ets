@@ -54,9 +54,8 @@ export struct FSTableComponent {
   private reload() {
     const tableNode = this.node;
     if (tableNode) {
-      log2.d(`component ${this.ID} table ${this.table.ID} reload start: ${JSON.stringify(this.table.summary)}`);
       const dequeueRow = (rowIndex: number, rowItem: TableItem) => {
-        let row = this.table.rows.slice(rowIndex, rowIndex + 1).pop();
+        let row = this.table.rows[rowIndex];
         if (!row) {
           row = new DSTableRow(rowItem, this.table);
           this.table.rows.push(row);
@@ -65,9 +64,8 @@ export struct FSTableComponent {
         }
         return row;
       };
-      const dequeueCell = (rowIndex: number, cellIndex: number, rowItem: TableItem, cellItem: TableItem) => {
-        const row = dequeueRow(rowIndex, rowItem);
-        let cell = row.cells.slice(cellIndex, cellIndex + 1).pop();
+      const dequeueCell = (row: DSTableRow, cellIndex: number, cellItem: TableItem) => {
+        let cell = row.cells[cellIndex];
         if (!cell) {
           cell = new DSTableCell(row, cellItem, this.table);
           row.cells.push(cell);
@@ -86,13 +84,17 @@ export struct FSTableComponent {
         });
       });
       rows.forEach((row, rowIndex) => {
-        dequeueRow(rowIndex, row as TableItem);
+        const tableRow = dequeueRow(rowIndex, row as TableItem);
         row.children.forEach((cell, cellIndex) => {
-          dequeueCell(rowIndex, cellIndex, row as TableItem, cell as TableItem);
+          dequeueCell(tableRow, cellIndex, cell as TableItem);
         });
+        if (tableRow.cells.length > row.children.length) {
+          tableRow.cells.splice(row.children.length);
+        }
       });
-
-      log2.d(`component ${this.ID} table ${this.table.ID} reload end: ${JSON.stringify(this.table.summary)}`);
+      if (this.table.rows.length > rows.length) {
+        this.table.rows.splice(rows.length);
+      }
     }
   }
   build() {
@@ -199,9 +201,8 @@ export struct TableComponent {
   private reload() {
     const tableNode = this.node;
     if (tableNode) {
-      log.i(`component ${this.ID} table ${this.table.ID} reload start: ${JSON.stringify(this.table.summary)}`);
       const dequeueRow = (rowIndex: number, rowItem: TableItem) => {
-        let row = this.table.rows.slice(rowIndex, rowIndex + 1).pop();
+        let row = this.table.rows[rowIndex];
         if (!row) {
           row = new DSTableRow(rowItem, this.table);
           this.table.rows.push(row);
@@ -210,9 +211,8 @@ export struct TableComponent {
         }
         return row;
       };
-      const dequeueCell = (rowIndex: number, cellIndex: number, rowItem: TableItem, cellItem: TableItem) => {
-        const row = dequeueRow(rowIndex, rowItem);
-        let cell = row.cells.slice(cellIndex, cellIndex + 1).pop();
+      const dequeueCell = (row: DSTableRow, cellIndex: number, cellItem: TableItem) => {
+        let cell = row.cells[cellIndex];
         if (!cell) {
           cell = new DSTableCell(row, cellItem, this.table);
           row.cells.push(cell);
@@ -231,17 +231,20 @@ export struct TableComponent {
         });
       });
       rows.forEach((row, rowIndex) => {
-        dequeueRow(rowIndex, row as TableItem);
+        const tableRow = dequeueRow(rowIndex, row as TableItem);
         row.children.forEach((cell, cellIndex) => {
-          dequeueCell(rowIndex, cellIndex, row as TableItem, cell as TableItem);
+          dequeueCell(tableRow, cellIndex, cell as TableItem);
         });
+        if (tableRow.cells.length > row.children.length) {
+          tableRow.cells.splice(row.children.length);
+        }
       });
-
-      log.i(`component ${this.ID} table ${this.table.ID} reload end: ${JSON.stringify(this.table.summary)}`);
+      if (this.table.rows.length > rows.length) {
+        this.table.rows.splice(rows.length);
+      }
     }
   }
   aboutToAppear(): void {
-    const mountStartedAt = Date.now();
     this.styledEmbed.embedController.updateEmbed = embed => {
       this.styledEmbed = embed;
     };
@@ -250,7 +253,6 @@ export struct TableComponent {
     };
     this.barOption = this.sharedEngine.event!.invokeTableBarOption({ bridge: this.bridge });
     this.reload();
-    log.i(`MDPerf table ${this.ID} aboutToAppear cost=${Date.now() - mountStartedAt}ms at=${Date.now()}`);
   }
 
   build() {
@@ -283,7 +285,6 @@ export struct TableComponent {
           this.styledEmbed?.componentAreaChange(oldValue, newValue);
         }
         this.table.onAreaChange(oldValue, newValue);
-        // log.i(`component ${this.ID} table ${this.table.ID} AreaChange (${newValue.width},${newValue.height}) ${JSON.stringify(this.table.summary)}`);
       })
       .visibility(this.table.ready ? Visibility.Visible : Visibility.Hidden)
       .width(this.styledEmbed?.initMetrics.width)
@@ -361,7 +362,6 @@ export struct TableComponent {
                     return;
                   }
                   cell.table?.deref()?.cellAreaChange(cell, oldValue, newValue);
-                  // log.i(`component ${this.ID} table ${this.table.ID} Cell ${cell.likelyKey} ${cell.ID} t ${cell.table?.deref()?.ID} AreaChange (${newValue.width},${newValue.height}) ${JSON.stringify(cell.summary)}`);
                 })
             } else {
               TextComponent({
@@ -411,12 +411,13 @@ class DSTable {
     //  re-layout row
     do {
       let maxHeight: Length = newValue.height;
-      cell.row.deref()?.cells.forEach(ele => {
+      const cells: DSTableCell[] = cell.row.deref()?.cells ?? [];
+      cells.forEach(ele => {
         if (ele.height !== undefined && ele.height > maxHeight) {
           maxHeight = ele.height;
         }
       });
-      cell.row.deref()?.cells.forEach(ele => {
+      cells.forEach(ele => {
         if (ele.height !== undefined && ele.height !== maxHeight) {
           ele.height = maxHeight;
         }
@@ -424,7 +425,6 @@ class DSTable {
       if (cell.height === undefined) {
         cell.height = maxHeight;
       }
-      log.i(`ds table ${this.ID} relayout row maxHeight ${maxHeight} cell ${cell.ID} ${cell.likelyKey}`);
     } while (0);
     //  re-layout column
     do {
@@ -450,11 +450,13 @@ class DSTable {
         if (cell.width === undefined) {
           cell.width = maxWidth;
         }
-        log.i(`ds table ${this.ID} relayout column maxWidth ${maxWidth} cell ${cell.ID} ${cell.likelyKey}`);
       }
     } while (0);
   }
   onAreaChange(_oldValue: Area, _newValue: Area) {
+    if (this.ready) {
+      return;
+    }
     let allCellReady: boolean = true;
     this.rows.forEach(row => {
       row.cells.forEach(cell => {
@@ -463,18 +465,9 @@ class DSTable {
         }
       });
     });
-    if (this.ready !== allCellReady) {
-      if (this.ready === false) {
-        this.ready = allCellReady;
-      }
+    if (allCellReady) {
+      this.ready = true;
     }
-  }
-  get summary(): IDSTableMeta {
-    return {
-      id: this.ID,
-      rows: this.rows.map(ele => ele.summary),
-      ready: this.ready,
-    };
   }
 }
 
@@ -506,13 +499,6 @@ class DSTableRow {
       return parent as TableItem;
     }
     return undefined;
-  }
-  get summary(): IDSTableRowMeta {
-    return {
-      id: this.ID,
-      index: this.index,
-      cells: this.cells.map(ele => ele.summary),
-    };
   }
   get likelyKey(): string | undefined {
     return `row:${this.index}`;
@@ -592,37 +578,12 @@ class DSTableCell {
   get index(): number | undefined {
     return this.row.deref()?.cells.indexOf(this);
   }
-  get summary(): IDSTableCellMeta {
-    return {
-      id: this.ID,
-      index: this.index,
-      width: this.width,
-      height: this.height,
-    };
-  }
   get ref(): DSTableCellRef {
     return `${this.row.deref()?.index ?? -1}:${this.index ?? -1}`;
   }
   get likelyKey(): string | undefined {
     return `row:${this.row?.deref()?.index}_cell:${this.index}`;
   }
-}
-
-interface IDSTableMeta {
-  id: number;
-  rows: IDSTableRowMeta[];
-  ready: boolean;
-}
-interface IDSTableRowMeta {
-  id: number;
-  index?: number;
-  cells: IDSTableCellMeta[];
-}
-interface IDSTableCellMeta {
-  id: number;
-  index?: number;
-  width?: Length;
-  height?: Length;
 }
 
 /**

@@ -11,6 +11,7 @@ import type { StyledValue } from '../../render/styled/styled-value';
 
 export class CodeService extends Service {
   private _css?: CssNode;
+  private plainStyledCache: Map<string, StyledString> = new Map<string, StyledString>();
   readonly type: EService = EService.Code;
   add<T extends Plugin>(_plugin: T): void {
   }
@@ -36,5 +37,27 @@ export class CodeService extends Service {
   }
   styledFromHtml(content: string, baseStyles?: StyledValue[]): StyledString | undefined {
     return this.engine?.deref()?.html?.toStyled(content, baseStyles);
+  }
+  styledFromText(content: string, baseStyles?: StyledValue[], styleKey: string = ''): StyledString | undefined {
+    const cacheKey: string = `${styleKey}:${content}`;
+    const cached: StyledString | undefined = this.plainStyledCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const escaped: string = content
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const styled: StyledString | undefined = this.engine?.deref()?.html?.toStyled(escaped, baseStyles);
+    if (styled !== undefined) {
+      if (this.plainStyledCache.size >= 128) {
+        for (const oldest of this.plainStyledCache.keys()) {
+          this.plainStyledCache.delete(oldest);
+          break;
+        }
+      }
+      this.plainStyledCache.set(cacheKey, styled);
+    }
+    return styled;
   }
 }

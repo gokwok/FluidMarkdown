@@ -6,11 +6,21 @@ import { K_COMPONENT, newLog, IMDArea, MDArea, MDMargin } from '../../util';
 import { Engine, BaseEngine } from '../../engine';
 import { ITheme } from '../../theme';
 import { StyledEmbed } from '../styled';
-import { ENode, Code } from '../../service/ast/node';
+import { ENode, Code, StyledContent } from '../../service/ast/node';
 import { EmbedComponent } from './embed';
 import { ContentBoxComponent, ContentBoxBar, ContentBoxEmptyActions, type IContentBoxAction, IContentBoxBar } from './content-box';
 
 const log = newLog('CodeComponent');
+
+@ObservedV2
+class CodeContentSlot {
+  readonly id: string;
+  @Trace content?: StyledContent;
+
+  constructor(index: number) {
+    this.id = `code-content-${index}`;
+  }
+}
 
 @ComponentV2
 export struct CodeComponent {
@@ -35,6 +45,8 @@ export struct CodeComponent {
 
   private barOption?: IContentBoxBar;
   private currentArea?: IMDArea;
+  @Local private contentSlots: CodeContentSlot[] = [];
+  private contentSlotCache: CodeContentSlot[] = [];
 
   private get node() {
     const node = this.styledEmbed.node;
@@ -49,12 +61,39 @@ export struct CodeComponent {
     this.styledEmbed.embedController.updateEmbed = embed => {
       if (embed?.option.styled.node?.hash !== this.styledEmbed?.option.styled.node?.hash) {
         this.styledEmbed = embed;
+        this.syncContentSlots();
       }
     };
     this.styledEmbed.embedController.currentArea = () => {
       return this.currentArea;
     };
     this.barOption = this.sharedEngine.event!.invokeCodeBarOption({ bridge: this.bridge });
+    this.syncContentSlots();
+  }
+
+  aboutToDisappear(): void {
+    this.contentSlots = [];
+    this.contentSlotCache = [];
+  }
+
+  private syncContentSlots(): void {
+    const contents: StyledContent[] = this.node?.styledContents ?? [];
+    for (let index: number = 0; index < contents.length; index += 1) {
+      let slot: CodeContentSlot | undefined = this.contentSlotCache[index];
+      if (slot === undefined) {
+        slot = new CodeContentSlot(index);
+        this.contentSlotCache.push(slot);
+      }
+      if (slot.content?.hash !== contents[index].hash) {
+        slot.content = contents[index];
+      }
+    }
+    for (let index: number = contents.length; index < this.contentSlotCache.length; index += 1) {
+      this.contentSlotCache[index].content = undefined;
+    }
+    if (this.contentSlots.length !== this.contentSlotCache.length) {
+      this.contentSlots = this.contentSlotCache.slice();
+    }
   }
 
   build() {
@@ -95,11 +134,16 @@ export struct CodeComponent {
   @Builder
   CodeContent() {
     Row() {
-      EmbedComponent({
-        node: this.node?.styledContent,
-        area: {},
-      })
-        .constraintSize({ minWidth: '100%' })
+      Column() {
+        ForEach(this.contentSlots, (slot: CodeContentSlot) => {
+          EmbedComponent({
+            node: slot.content,
+            area: {},
+          })
+            .constraintSize({ minWidth: '100%' })
+        }, (slot: CodeContentSlot) => slot.id)
+      }
+      .constraintSize({ minWidth: '100%' })
     }
     .padding(this.theme.contentBox?.barMargin ? MDMargin.lengthMargin(this.theme.contentBox?.barMargin) : undefined)
   }
