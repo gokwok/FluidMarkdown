@@ -1,6 +1,6 @@
 {
   "name": "fluid-markdown",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Streaming Markdown engine for AI chat on mobile.",
   "keywords": [ "markdown", "chat", "native", "stream-output", "ai", "ios", "android", "harmonyos" ],
   "homepage": "https://github.com/antgroup/FluidMarkdown",
@@ -10,5 +10,8 @@
   "license": "Apache-2.0",
   "dependencies": {
     "liblatexentry.so": "file:./src/main/cpp/types/liblatexentry"
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.24"
   }
 }

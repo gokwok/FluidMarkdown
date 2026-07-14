@@ -24,14 +24,8 @@
       "arkOptions": {
         "obfuscation": {
           "ruleOptions": {
-            "enable": true,
-            "files": [
-              "./obfuscation-rules.txt"
-            ]
-          },
-          "consumerFiles": [
-            "./consumer-rules.txt"
-          ]
+            "enable": false
+          }
         }
       }
     },
@@ -45,14 +39,8 @@
       "arkOptions": {
         "obfuscation": {
           "ruleOptions": {
-            "enable": true,
-            "files": [
-              "./obfuscation-rules.txt"
-            ]
-          },
-          "consumerFiles": [
-            "./consumer-rules.txt"
-          ]
+            "enable": false
+          }
         }
       }
     }
@@ -60,6 +48,9 @@
   "targets": [
     {
       "name": "default"
+    },
+    {
+      "name": "ohosTest"
     }
   ]
 }
