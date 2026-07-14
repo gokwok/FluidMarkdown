@@ -477,8 +477,10 @@ export class Code extends Node {
     return MDUuid.md5(content);
   }
   get styledContent() {
-    const first = this.first?.deref();
-    return first?.is(ENode.StyledContent) ? first as StyledContent : undefined;
+    return this.styledContents[0];
+  }
+  get styledContents(): StyledContent[] {
+    return this.children.filter((node: Node): boolean => node.is(ENode.StyledContent)) as StyledContent[];
   }
 }
 interface IListSummary extends INodeSummary {

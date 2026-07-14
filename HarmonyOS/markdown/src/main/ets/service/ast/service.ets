@@ -18,8 +18,180 @@ import type { Declaration, Rule } from '../css/csstree';
 import { newLog } from '../../util';
 
 const log = newLog('AstService');
+const PLAIN_CODE_CHUNK_MAX_LINES: number = 12;
+const PLAIN_CODE_CHUNK_MAX_CHARS: number = 1024;
 
-interface IResult {
+interface MarkdownFence {
+  marker: string;
+  length: number;
+  tail: string;
+}
+
+function markdownFence(line: string): MarkdownFence | undefined {
+  let start: number = 0;
+  while (start < line.length && line.charAt(start) === ' ') {
+    start += 1;
+  }
+  if (start > 3 || start >= line.length) {
+    return undefined;
+  }
+  const marker: string = line.charAt(start);
+  if (marker !== '`' && marker !== '~') {
+    return undefined;
+  }
+  let end: number = start;
+  while (end < line.length && line.charAt(end) === marker) {
+    end += 1;
+  }
+  if (end - start < 3) {
+    return undefined;
+  }
+  return { marker, length: end - start, tail: line.substring(end) };
+}
+
+function splitTableCells(line: string): string[] {
+  const cells: string[] = [];
+  let current: string = '';
+  let backslashCount: number = 0;
+  for (let index: number = 0; index < line.length; index += 1) {
+    const char: string = line.charAt(index);
+    if (char === '|' && backslashCount % 2 === 0) {
+      cells.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+    backslashCount = char === '\\' ? backslashCount + 1 : 0;
+  }
+  cells.push(current);
+  if (cells.length > 0 && cells[0].trim().length === 0) {
+    cells.shift();
+  }
+  if (cells.length > 0 && cells[cells.length - 1].trim().length === 0) {
+    cells.pop();
+  }
+  return cells;
+}
+
+function tableHeaderColumnCount(line: string): number {
+  if (line.indexOf('|') < 0) {
+    return 0;
+  }
+  const cells: string[] = splitTableCells(line.trim());
+  for (let index: number = 0; index < cells.length; index += 1) {
+    if (/[^\s:\-]/.test(cells[index])) {
+      return cells.length;
+    }
+  }
+  return 0;
+}
+
+function normalizedTableDelimiter(line: string, columnCount: number): string | undefined {
+  const leadingLength: number = line.length - line.trimStart().length;
+  const trailingLength: number = line.length - line.trimEnd().length;
+  const leading: string = line.substring(0, leadingLength);
+  const trailing: string = trailingLength > 0 ? line.substring(line.length - trailingLength) : '';
+  const value: string = line.trim();
+  if (value.length === 0) {
+    return undefined;
+  }
+  const hasLeadingPipe: boolean = value.startsWith('|');
+  const hasTrailingPipe: boolean = value.endsWith('|');
+  const cells: string[] = value.split('|');
+  if (hasLeadingPipe) {
+    cells.shift();
+  }
+  if (hasTrailingPipe) {
+    cells.pop();
+  }
+  if (cells.length === 0) {
+    return undefined;
+  }
+  for (let index: number = 0; index < cells.length; index += 1) {
+    const cell: string = cells[index].trim();
+    if (!/^:?-+:?$/.test(cell)) {
+      return undefined;
+    }
+    cells[index] = cell;
+  }
+  if (cells.length === columnCount) {
+    return line;
+  }
+  if (cells.length > columnCount) {
+    cells.splice(columnCount);
+  } else {
+    while (cells.length < columnCount) {
+      cells.push('---');
+    }
+  }
+  return `${leading}${hasLeadingPipe ? '|' : ''}${cells.join('|')}${hasTrailingPipe ? '|' : ''}${trailing}`;
+}
+
+export function normalizeTableDelimiterColumns(content: string): string {
+  if (content.indexOf('|') < 0) {
+    return content;
+  }
+  const lines: string[] = content.split('\n');
+  let activeFence: MarkdownFence | undefined = undefined;
+  for (let index: number = 0; index < lines.length; index += 1) {
+    const fence: MarkdownFence | undefined = markdownFence(lines[index]);
+    if (activeFence !== undefined) {
+      if (fence !== undefined && fence.marker === activeFence.marker &&
+        fence.length >= activeFence.length && fence.tail.trim().length === 0) {
+        activeFence = undefined;
+      }
+      continue;
+    }
+    if (fence !== undefined) {
+      activeFence = fence;
+      continue;
+    }
+    if (index === 0) {
+      continue;
+    }
+    if (lines[index].indexOf('|') < 0) {
+      continue;
+    }
+    const columnCount: number = tableHeaderColumnCount(lines[index - 1]);
+    if (columnCount === 0) {
+      continue;
+    }
+    const normalized: string | undefined = normalizedTableDelimiter(lines[index], columnCount);
+    if (normalized !== undefined) {
+      lines[index] = normalized;
+    }
+  }
+  return lines.join('\n');
+}
+
+export function splitPlainCodeContent(content: string): string[] {
+  if (content.length === 0) {
+    return [''];
+  }
+  const lines: string[] = content.split('\n');
+  const chunks: string[] = [];
+  let chunkLines: string[] = [];
+  let chunkLength: number = 0;
+  for (let index: number = 0; index < lines.length; index += 1) {
+    const line: string = lines[index];
+    const addedLength: number = line.length + (chunkLines.length > 0 ? 1 : 0);
+    if (chunkLines.length > 0 &&
+      (chunkLines.length >= PLAIN_CODE_CHUNK_MAX_LINES ||
+        chunkLength + addedLength > PLAIN_CODE_CHUNK_MAX_CHARS)) {
+      chunks.push(chunkLines.join('\n'));
+      chunkLines = [];
+      chunkLength = 0;
+    }
+    chunkLines.push(line);
+    chunkLength += line.length + (chunkLines.length > 1 ? 1 : 0);
+  }
+  if (chunkLines.length > 0) {
+    chunks.push(chunkLines.join('\n'));
+  }
+  return chunks;
+}
+
+export interface IResult {
   program: Program;
   content?: string;
 }
@@ -75,15 +247,8 @@ export class AstService extends Service {
     const tail = this.tail.then(async () => {
       this.parsePlugin?.handler?.willParse?.(content);
 
-      const tokens = this.markdown_it.parse(content, new Object());
-      const program = new Program(tokens, {
-        engine: () => this.engine,
-      });
-      this.prepareFragment(program);
-      program.document.createHash();
-      this.prepareCodeBlock(program);
-
-      const result: IResult = { program, content };
+      const tokens = this.markdown_it.parse(normalizeTableDelimiterColumns(content), new Object());
+      const result: IResult = this.buildResult(content, tokens);
 
       this.parsePlugin?.handler?.didParse?.(result);
 
@@ -94,8 +259,45 @@ export class AstService extends Service {
     this.tail = tail;
     return tail;
   }
+  parseWithStablePrefix(content: string, prefixTokens: Token[], tailContent: string,
+    tailLineOffset: number): Promise<IResult> {
+    this.count++;
+    const tail = this.tail.then(async () => {
+      this.parsePlugin?.handler?.willParse?.(content);
+      const tailTokens: Token[] = this.markdown_it.parse(normalizeTableDelimiterColumns(tailContent), new Object());
+      this.offsetTokenMaps(tailTokens, tailLineOffset);
+      const tokens: Token[] = prefixTokens.slice().concat(tailTokens);
+      const result: IResult = this.buildResult(content, tokens);
+      this.parsePlugin?.handler?.didParse?.(result);
+      return result;
+    }).finally(() => {
+      this.count--;
+    });
+    this.tail = tail;
+    return tail;
+  }
   get processing(): boolean {
     return this.count > 0;
+  }
+  private buildResult(content: string, tokens: Token[]): IResult {
+    const program = new Program(tokens, {
+      engine: () => this.engine,
+    });
+    this.prepareFragment(program);
+    program.document.createHash();
+    this.prepareCodeBlock(program);
+    return { program, content };
+  }
+  private offsetTokenMaps(tokens: Token[], lineOffset: number): void {
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token: Token = tokens[index];
+      if (token.map !== null) {
+        token.map = [token.map[0] + lineOffset, token.map[1] + lineOffset];
+      }
+      if (token.children !== null && token.children !== undefined) {
+        this.offsetTokenMaps(token.children, lineOffset);
+      }
+    }
   }
   toHtml(node: Node): string {
     const tokens: Token[] = [];
@@ -196,6 +398,20 @@ export class AstService extends Service {
     });
     for (const code of codes) {
       if (code.content) {
+        if (!highlightEnabled) {
+          const styleKey: string = JSON.stringify(codeTheme?.font ?? {});
+          const chunks: string[] = splitPlainCodeContent(code.content);
+          for (let index: number = 0; index < chunks.length; index += 1) {
+            const styled = new StyledContent();
+            styled.styled = this.engine?.deref()?.code?.styledFromText(chunks[index], baseStyles, styleKey);
+            if (styled.styled !== undefined) {
+              styled.createHash();
+              program.nodes.push(styled);
+              code.append(styled);
+            }
+          }
+          continue;
+        }
         const page = this.engine?.deref()?.code?.parse4page(code.content, { language: code.language || '' });
         if (page) {
           const html = this.engine?.deref()?.html?.parse(page);
