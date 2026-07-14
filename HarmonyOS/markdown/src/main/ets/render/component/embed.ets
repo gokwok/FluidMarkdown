@@ -19,8 +19,6 @@ import {
 } from '../typing';
 
 const log = newLog('EmbedComponent');
-// 性能剖析临时打点，量完移除。
-const perf = newLog('MDPerf');
 
 @ComponentV2
 export struct EmbedComponent {
@@ -71,7 +69,7 @@ export struct EmbedComponent {
     const node = monitor.value<Node>();
     if (node) {
       if (node.now?.hash !== node.before?.hash) {
-        this.attach4normal(node.now);
+        this.attach4update(ETypingMode.Update, node.now);
       }
     } else {
       this.layers = [];
@@ -82,7 +80,6 @@ export struct EmbedComponent {
     if (!node) {
       return;
     }
-    const attachStartedAt = Date.now();
     this.layers = [];
     const content = StyledObject.root(this.area, this.styles)
       .on<IStyledObjectAppendEvent>(EStyledObjectEvent.DidAppend, event => {
@@ -105,7 +102,6 @@ export struct EmbedComponent {
       },
     });
     this.content = content;
-    perf.i(`embed ${this.ID} attach4normal cost=${Date.now() - attachStartedAt}ms layers=${this.layers.length} len=${content.length}`);
   }
   private attach4update(mode: ETypingMode, node?: Node) {
     if (!node) {
@@ -152,7 +148,7 @@ export struct EmbedComponent {
         content.attach(styled);
       },
     });
-    this.content = content;
+    this.applyNormalUpdateContent(content);
     do {
       //  clear unused layers
       let index = 0;
@@ -161,12 +157,27 @@ export struct EmbedComponent {
         const current = currentLayers[embed.likelyKey];
         if (current) {
           this.layers.splice(index, 1, current);
+          index++;
         } else {
           this.layers.splice(index, 1);
         }
-        index++;
       }
     } while (0);
+  }
+  private applyNormalUpdateContent(content: StyledObject): void {
+    const currentText: string = this.content.getString();
+    const nextText: string = content.getString();
+    if (currentText.length > 0 && nextText.length > currentText.length && nextText.indexOf(currentText) === 0) {
+      try {
+        const delta: StyledString = content.subStyledString(currentText.length, nextText.length - currentText.length);
+        this.content.appendStyledString(delta);
+        this.textComponentController.refresh();
+        return;
+      } catch (e) {
+        log.w(`${this.ID} append normal update failed, replace content. ${e?.message}`);
+      }
+    }
+    this.content = content;
   }
   private attach4typing(mode: ETypingMode, node?: Node) {
     if (!this.controller) {
@@ -292,7 +303,6 @@ export struct EmbedComponent {
     this.controller?.typing.resume();
   }
   aboutToAppear(): void {
-    log.i(`aboutToAppear node: ${JSON.stringify(this.node?.summary)}`);
     this.onEmbedComponentBeforeAboutToAppear({ controller: this.controller });
     this.sharedEngine.ctx!.typing().rootController?.deref()?.on<ITypingPauseEvent>(ETypingEvent.Pause, this.onRootTypingPause);
     this.sharedEngine.ctx!.typing().rootController?.deref()?.on<ITypingResumeEvent>(ETypingEvent.Resume, this.onRootTypingResume);
@@ -301,7 +311,6 @@ export struct EmbedComponent {
     this.onEmbedComponentAfterAboutToAppear({ controller: this.controller });
   }
   aboutToDisappear(): void {
-    log.i(`aboutToDisappear node: ${JSON.stringify(this.node?.summary)}`);
     this.onEmbedComponentBeforeAboutToDisappear({ controller: this.controller });
     this.sharedEngine.ctx!.typing().rootController?.deref()?.off(ETypingEvent.Pause, this.onRootTypingPause);
     this.sharedEngine.ctx!.typing().rootController?.deref()?.off(ETypingEvent.Resume, this.onRootTypingResume);

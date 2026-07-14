@@ -2,7 +2,7 @@
 // Use of this source code is governed by a Apache 2.0 license that can be
 // found in the LICENSE file.
 
-import { newLog, IMDArea, K_COMPONENT, MDArea } from '../../util';
+import { newLog, IMDArea, K_COMPONENT, MDArea, EMarkdownMode } from '../../util';
 import { Engine, BaseEngine } from '../../engine';
 import { ITheme } from '../../theme';
 import { EmbedComponent, EmbedComponentController } from './embed';
@@ -27,6 +27,7 @@ export struct FragmentComponent {
   @Consumer(K_COMPONENT.SHARED_ENGINE) sharedEngine: Engine = new BaseEngine();
 
   @Local fragments: Fragment[] = [];
+  private fragmentCache: Fragment[] = [];
 
   @Event onFragmentComponentBeforeAboutToAppear: Callback<IFragmentComponentEvent>;
   @Event onFragmentComponentAfterAboutToAppear: Callback<IFragmentComponentEvent>;
@@ -41,18 +42,25 @@ export struct FragmentComponent {
     this.attach4normal(node);
   }
   private dequeueFragment(index: number, node?: Node) {
-    let fragment = this.fragments.slice(index, index + 1).pop();
+    let fragment = this.fragmentCache.slice(index, index + 1).pop();
     if (fragment) {
       fragment.option.likelyKey = Fragment.likelyKey(index, node);
-      fragment.option.node = node;
+      if (fragment.node?.hash !== node?.hash) {
+        fragment.node = node;
+      }
     } else {
       fragment = new Fragment({ likelyKey: Fragment.likelyKey(index, node), node });
       fragment.embedController.typing.on<ITypingFinishEvent>(ETypingEvent.Finish, e => {
         this.onEmbedControllerTypingFinish(e);
       });
-      this.fragments.push(fragment);
+      this.fragmentCache.push(fragment);
     }
     return fragment;
+  }
+  private appendRenderedFragment(fragment: Fragment): void {
+    if (this.fragments.indexOf(fragment) < 0) {
+      this.fragments = this.fragments.concat([fragment]);
+    }
   }
   private get fragment() {
     return this.fragments.slice().pop();
@@ -68,6 +76,8 @@ export struct FragmentComponent {
   }
   aboutToDisappear(): void {
     this.onFragmentComponentBeforeAboutToDisappear?.({});
+    this.fragments = [];
+    this.fragmentCache = [];
     this.onFragmentComponentAfterAboutToDisappear?.({});
   }
   private bindController() {
@@ -99,6 +109,7 @@ export struct FragmentComponent {
         this.dirtyTypingUpdateData = { content: node, mode, hasMore, nodes: node.children };
         if (mode === ETypingMode.Begin) {
           this.fragments = [];
+          this.fragmentCache = [];
         }
         this.attach4typing();
       } else {
@@ -116,9 +127,28 @@ export struct FragmentComponent {
       } else {
         fragments.push(this.dequeueFragment(0, node));
       }
-      this.fragments = fragments;
+      for (let index: number = fragments.length; index < this.fragmentCache.length; index += 1) {
+        this.fragmentCache[index].node = undefined;
+      }
+      if (this.sharedEngine.ctx?.markdownMode() === EMarkdownMode.Normal) {
+        if (this.fragments.length !== this.fragmentCache.length) {
+          this.fragments = this.fragmentCache.slice();
+        }
+      } else {
+        this.fragments = fragments;
+      }
     } else {
-      this.fragments = [];
+      for (let index: number = 0; index < this.fragmentCache.length; index += 1) {
+        this.fragmentCache[index].node = undefined;
+      }
+      if (this.sharedEngine.ctx?.markdownMode() === EMarkdownMode.Normal) {
+        if (this.fragments.length !== this.fragmentCache.length) {
+          this.fragments = this.fragmentCache.slice();
+        }
+      } else {
+        this.fragments = [];
+        this.fragmentCache = [];
+      }
     }
   }
   private attach4typing() {
@@ -133,7 +163,7 @@ export struct FragmentComponent {
     if (!!this.sharedEngine.ctx?.fragmentEnable) {
       const targets = this.dirtyTypingUpdateData.content.children;
       if (targets.length > 0 && this.fragments.length === 0) {
-        this.dequeueFragment(0);
+        this.appendRenderedFragment(this.dequeueFragment(0));
         log.i(`${this.ID} first fragment, will dequeue: ${this.fragments.length}`);
       }
       if (targets.length < this.fragments.length) {
@@ -164,6 +194,7 @@ export struct FragmentComponent {
       log.i(`${this.ID} after update fragments: ${this.fragments.length} targets: ${targets.length}`)
     } else {
       const fragment = this.dequeueFragment(0);
+      this.appendRenderedFragment(fragment);
       fragment.update(this.dirtyTypingUpdateData.content, this.dirtyTypingUpdateData.mode, this.dirtyTypingUpdateData.hasMore);
       if (this.fragments.length > 1) {
         this.fragments = [fragment];
@@ -193,7 +224,7 @@ export struct FragmentComponent {
         }
       } else {
         log.i(`${this.ID} typing next fragment. fragments: ${this.fragments.length}, targets: ${targets.length}`);
-        this.dequeueFragment(this.fragments.length);
+        this.appendRenderedFragment(this.dequeueFragment(this.fragments.length));
         this.attach4typing();
       }
     } else {
@@ -215,7 +246,7 @@ export struct FragmentComponent {
           },
         })
           .width('100%')
-      }, (fragment: Fragment) => `${fragment.likelyKey}_${fragment.ID}`)
+      }, (fragment: Fragment) => `${fragment.ID}`)
     }
   }
 }
@@ -226,6 +257,7 @@ interface IFragment {
   likelyKey: string;
   node?: Node;
 }
+@ObservedV2
 class Fragment {
   private static gid: number = 0;
   private static getGid() {
@@ -235,11 +267,13 @@ class Fragment {
   readonly embedController: EmbedComponentController = new EmbedComponentController();
   readonly option: IFragment;
   updateData?: ITypingUpdateData<Node>;
+  @Trace private currentNode?: Node;
 
   private _typingReady: boolean = false;
 
   constructor(option: IFragment) {
     this.option = option;
+    this.currentNode = option.node;
   }
   get typingReady() {
     return this._typingReady;
@@ -260,8 +294,12 @@ class Fragment {
       log2.i(`${this.ID} typing not ready, will update after ready`);
     }
   }
-  get node() {
-    return this.option.node;
+  get node(): Node | undefined {
+    return this.currentNode;
+  }
+  set node(value: Node | undefined) {
+    this.currentNode = value;
+    this.option.node = value;
   }
   get likelyKey() {
     return this.option.likelyKey;

@@ -5,6 +5,8 @@
 import { Engine, BaseEngine } from './engine';
 import { newLog, K_COMPONENT, IMDArea, MDArea, EMarkdownMode, EMarkdownMainBotEvent } from './util';
 import { Program, type Node } from './service/ast/node';
+import { findIncrementalMarkdownSplit, IResult } from './service/ast';
+import type { Token } from './service/ast/markdown-it';
 import {
   type ITextComponentSelectionChangeEvent,
   type ITextComponentEvent, type ITextComponentSelectionOption,
@@ -18,8 +20,20 @@ import {
 import { type ITheme } from './theme';
 
 const log = newLog('Markdown');
-// 性能剖析临时打点，量完移除。
-const perf = newLog('MDPerf');
+
+class MarkdownParseRequest {
+  readonly content: string;
+  readonly context: string;
+  readonly sequence: number;
+  readonly incremental: boolean;
+
+  constructor(content: string, context: string, sequence: number, incremental: boolean) {
+    this.content = content;
+    this.context = context;
+    this.sequence = sequence;
+    this.incremental = incremental;
+  }
+}
 
 @ComponentV2
 export struct Markdown {
@@ -34,6 +48,7 @@ export struct Markdown {
   @Param @Once engine: Engine = new BaseEngine();
   @Param @Once mode: EMarkdownMode = EMarkdownMode.Normal;
   @Param @Once area: IMDArea = {};
+  @Param finalized: boolean = false;
 
   @Event onMarkdownBeforeAboutToAppear: Callback<IMarkdownEvent>;
   @Event onMarkdownAfterAboutToAppear: Callback<IMarkdownEvent>;
@@ -66,8 +81,10 @@ export struct Markdown {
   private typingUpdateDataList: ITypingUpdateData<string>[] = [];
   private typingUpdateData?: ITypingUpdateData<string>;
 
-  private perfMountedAt: number = 0;
   private parseSequence: number = 0;
+  private parseInFlight: boolean = false;
+  private pendingParse?: MarkdownParseRequest;
+  private lastRequestedContent?: string;
 
   private nextParseSequence(): number {
     this.parseSequence += 1;
@@ -76,29 +93,45 @@ export struct Markdown {
 
   private parseLatestContent(content: string, context: string): void {
     const sequence = this.nextParseSequence();
-    const parseStartedAt = Date.now();
-    this.parser.parse(content).then((program: Program) => {
-      if (sequence !== this.parseSequence || content !== this.content) {
-        log.i(`${this.ID} skip stale parse result. context: ${context} sequence: ${sequence} latest: ${this.parseSequence}`);
+    this.lastRequestedContent = content;
+    const request = new MarkdownParseRequest(
+      content,
+      context,
+      sequence,
+      !this.finalized && context === 'content',
+    );
+    if (this.parseInFlight) {
+      this.pendingParse = request;
+      return;
+    }
+    this.executeParse(request);
+  }
+
+  private executeParse(request: MarkdownParseRequest): void {
+    this.parseInFlight = true;
+    this.parser.parse(request.content, request.incremental).then((program: Program) => {
+      if (request.sequence !== this.parseSequence || request.content !== this.content) {
+        log.i(`${this.ID} skip stale parse result. context: ${request.context} sequence: ${request.sequence} latest: ${this.parseSequence}`);
         return;
-      }
-      if (context === 'eager') {
-        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms (eager)`);
-      } else if (context === 'area') {
-        perf.i(`${this.ID} parse done +${Date.now() - this.perfMountedAt}ms cost=${Date.now() - parseStartedAt}ms`);
       }
       this.program = program;
     }).catch((e: Error) => {
-      log.w(`${this.ID} can not parse content for ${context}. parse failed: ${e?.message}`);
+      log.w(`${this.ID} can not parse content for ${request.context}. parse failed: ${e?.message}`);
+    }).finally(() => {
+      this.parseInFlight = false;
+      const pending: MarkdownParseRequest | undefined = this.pendingParse;
+      this.pendingParse = undefined;
+      if (pending !== undefined) {
+        this.executeParse(pending);
+      }
     });
   }
 
   @Monitor('area') _onMarkdownAreaChange(monitor: IMonitor) {
     const value = monitor.value<IMDArea>();
     if (MDArea.isEmpty(value?.before) && this.mode === EMarkdownMode.Normal) {
-      perf.i(`${this.ID} area ready +${Date.now() - this.perfMountedAt}ms`);
       // parse 不依赖宽度，aboutToAppear 已提前启动；内容没变就不重复 parse。
-      if (this.parser.lastContent === this.content) {
+      if (this.lastRequestedContent === this.content) {
         return;
       }
       this.parseLatestContent(this.content, 'area');
@@ -106,9 +139,15 @@ export struct Markdown {
   }
   @Monitor('content') onContentChange(monitor: IMonitor) {
     const value = monitor.value<string>();
-    log.i(`${this.ID} onContentChange now: ${value?.now} before: ${value?.before}`);
+    log.d(`${this.ID} onContentChange length: ${value?.now?.length ?? 0}`);
     if (this.mode === EMarkdownMode.Normal) {
       this.parseLatestContent(value?.now || '', 'content');
+    }
+  }
+  @Monitor('finalized') onFinalizedChange(monitor: IMonitor) {
+    const value = monitor.value<boolean>();
+    if (value?.now === true && value?.before !== true && this.mode === EMarkdownMode.Normal) {
+      this.parseLatestContent(this.content, 'final');
     }
   }
   private bindController() {
@@ -171,7 +210,7 @@ export struct Markdown {
     const data = this.typingUpdateDataList.slice().pop();
     if (data) {
       this.typingUpdateData = data;
-      this.parser.parse(data.content).then(program => {
+      this.parser.parse(data.content, false).then(program => {
         log.i(`${this.ID} will update typing content after parse. node: ${program.document.hash}, mode: ${data.mode}, hasMore: ${data.hasMore} content: ${data.content}`);
         this.fragmentController.typing.update(program.document, data.mode);
       }).catch((e: Error) => {
@@ -213,8 +252,6 @@ export struct Markdown {
   }
 
   aboutToAppear(): void {
-    this.perfMountedAt = Date.now();
-    perf.i(`${this.ID} mounted at=${this.perfMountedAt}`);
     log.i(`${this.ID} before aboutToAppear`);
     this.onMarkdownBeforeAboutToAppear({});
     this.engine.ctx!.ctx = this.getUIContext();
@@ -326,17 +363,26 @@ class MarkdownParser {
   readonly ID: number = MarkdownParser.gid++;
   private count: number = 0;
   private engine: Engine;
+  private stablePrefixContent: string = '';
+  private stablePrefixTokens: Token[] = [];
   lastContent?: string;
   constructor(engine: Engine) {
     this.engine = engine;
   }
-  async parse(content: string): Promise<Program> {
+  async parse(content: string, incremental: boolean = false): Promise<Program> {
     this.lastContent = content;
     try {
       this.count++;
-      log2.i(`${this.ID} drop parse task. count: ${this.count} content: ${JSON.stringify(content)}`);
-      const result = (await this.engine.ast!.parse(content));
-      log2.i(`${this.ID} parse content success: document hash: ${result.program.document.hash} document children: ${result.program.document.children.length} content: ${JSON.stringify(result.content)} `);
+      log2.d('parse start id=%{public}d count=%{public}d length=%{public}d incremental=%{public}s',
+        this.ID, this.count, content.length, String(incremental));
+      let result: IResult;
+      if (incremental) {
+        result = await this.parseIncremental(content);
+      } else {
+        result = await this.engine.ast!.parse(content);
+      }
+      log2.d('parse complete id=%{public}d children=%{public}d length=%{public}d',
+        this.ID, result.program.document.children.length, content.length);
       this.count--;
       return result.program;
     } catch (e) {
@@ -346,6 +392,41 @@ class MarkdownParser {
   }
   get processing(): boolean {
     return this.count > 0;
+  }
+  private async parseIncremental(content: string): Promise<IResult> {
+    const reusablePrefix: boolean = this.stablePrefixContent.length > 0 &&
+      content.indexOf(this.stablePrefixContent) === 0 &&
+      content.length - this.stablePrefixContent.length <= 8192;
+    if (!reusablePrefix) {
+      const split: number = findIncrementalMarkdownSplit(content);
+      if (split <= 0) {
+        return this.engine.ast!.parse(content);
+      }
+      const prefixContent: string = content.substring(0, split);
+      const prefixResult = await this.engine.ast!.parse(prefixContent);
+      const tokens: Token[] | undefined = prefixResult.program.document.tokens;
+      if (tokens === undefined || tokens.length === 0) {
+        return this.engine.ast!.parse(content);
+      }
+      this.stablePrefixContent = prefixContent;
+      this.stablePrefixTokens = tokens.slice();
+    }
+    const tailContent: string = content.substring(this.stablePrefixContent.length);
+    return this.engine.ast!.parseWithStablePrefix(
+      content,
+      this.stablePrefixTokens,
+      tailContent,
+      this.lineCount(this.stablePrefixContent),
+    );
+  }
+  private lineCount(content: string): number {
+    let count: number = 0;
+    for (let index: number = 0; index < content.length; index += 1) {
+      if (content.charAt(index) === '\n') {
+        count += 1;
+      }
+    }
+    return count;
   }
 }
 
