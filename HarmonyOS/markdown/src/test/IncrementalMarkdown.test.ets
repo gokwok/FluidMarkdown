@@ -1,6 +1,12 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { findIncrementalMarkdownSplit } from '../main/ets/service/ast/incremental';
-import { normalizeTableDelimiterColumns, splitPlainCodeContent } from '../main/ets/service/ast/service';
+import {
+  isStandaloneEmbedBlock,
+  normalizeTableDelimiterColumns,
+  splitPlainCodeContent,
+} from '../main/ets/service/ast/service';
+import { Document, ELayout, ENode, Fragment, Node } from '../main/ets/service/ast/node';
+import { canAppendNormalUpdate } from '../main/ets/render/component/embed';
 
 function plainBlocks(count: number): string {
   const blocks: string[] = [];
@@ -164,6 +170,44 @@ export default function incrementalMarkdownTest() {
 
       expect(normalizeTableDelimiterColumns(escapedPipe)).assertEqual(escapedPipe);
       expect(normalizeTableDelimiterColumns(aligned)).assertEqual(aligned);
+    });
+
+    it('isolates block embeds from surrounding text fragments', 0, () => {
+      const table: Node = new Node({ type: ENode.Table, layout: ELayout.Block });
+      const code: Node = new Node({ type: ENode.Code, layout: ELayout.Block });
+      const inlineCode: Node = new Node({ type: ENode.Code, layout: ELayout.Inline });
+      const paragraph: Node = new Node({ type: ENode.Paragraph, layout: ELayout.Block });
+
+      expect(isStandaloneEmbedBlock(table)).assertTrue();
+      expect(isStandaloneEmbedBlock(code)).assertTrue();
+      expect(isStandaloneEmbedBlock(inlineCode)).assertFalse();
+      expect(isStandaloneEmbedBlock(paragraph)).assertFalse();
+    });
+
+    it('appends only embed-free normal content', 0, () => {
+      expect(canAppendNormalUpdate('正文', '正文新增', 0, 0)).assertTrue();
+      expect(canAppendNormalUpdate('表格占位', '表格占位\n功能列表', 1, 1)).assertFalse();
+      expect(canAppendNormalUpdate('正文', '正文后新增表格', 0, 1)).assertFalse();
+      expect(canAppendNormalUpdate('正文', '改写正文', 0, 0)).assertFalse();
+    });
+
+    it('keeps a fragment local hash stable when a following fragment changes', 0, () => {
+      const document: Document = new Document();
+      const tableFragment: Fragment = new Fragment();
+      const tailFragment: Fragment = new Fragment();
+      tableFragment.append(new Node({ type: ENode.Table, layout: ELayout.Block }));
+      tailFragment.append(new Node({ type: ENode.Paragraph, layout: ELayout.Block, content: '功能' }));
+      document.append(tableFragment);
+      document.append(tailFragment);
+      document.createHash();
+      const tableLocalHash: string | undefined = tableFragment.localHash;
+      const tableAggregateHash: string | undefined = tableFragment.hash;
+
+      tailFragment.append(new Node({ type: ENode.List, layout: ELayout.Block, content: '新增列表' }));
+      document.createHash();
+
+      expect(tableFragment.localHash).assertEqual(tableLocalHash);
+      expect(tableFragment.hash === tableAggregateHash).assertFalse();
     });
   });
 }

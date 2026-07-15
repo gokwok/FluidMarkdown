@@ -20,6 +20,7 @@ export struct FragmentComponent {
   readonly ID: number = FragmentComponent.getGid();
 
   @Param node?: Node = undefined;
+  @Param renderRevision: number = 0;
   @Param @Once controller: FragmentComponentController = new FragmentComponentController({});
   @Require @Param area: IMDArea = {};
 
@@ -45,7 +46,7 @@ export struct FragmentComponent {
     let fragment = this.fragmentCache.slice(index, index + 1).pop();
     if (fragment) {
       fragment.option.likelyKey = Fragment.likelyKey(index, node);
-      if (fragment.node?.hash !== node?.hash) {
+      if (fragment.node?.localHash !== node?.localHash) {
         fragment.node = node;
       }
     } else {
@@ -237,6 +238,7 @@ export struct FragmentComponent {
       ForEach(this.fragments, (fragment: Fragment) => {
         EmbedComponent({
           node: fragment.node, controller: fragment.embedController, area: this.area,
+          renderRevision: this.renderRevision,
           onEmbedComponentAfterAboutToAppear: () => {
             log.i(`${this.ID} fragment ${fragment.ID} typing ready`);
             fragment.typingReady = true;
@@ -305,7 +307,7 @@ class Fragment {
     return this.option.likelyKey;
   }
   static likelyKey(index: number, node?: Node) {
-    return `fragment-${index}-${node?.hash}`;
+    return `fragment-${index}-${node?.localHash}`;
   }
 }
 

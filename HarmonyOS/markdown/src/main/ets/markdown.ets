@@ -70,6 +70,7 @@ export struct Markdown {
   @Event onMarkdownTypingCompleted: Callback<IMarkdownEvent>;
 
   @Local program?: Program;
+  @Local finalizationRevision: number = 0;
   @Provider(K_COMPONENT.THEME) theme: ITheme = this.engine.theme!.theme;
   @Provider(K_COMPONENT.SHARED_ENGINE) sharedEngine: Engine = this.engine;
 
@@ -115,6 +116,9 @@ export struct Markdown {
         return;
       }
       this.program = program;
+      if (request.context === 'final') {
+        this.finalizationRevision += 1;
+      }
     }).catch((e: Error) => {
       log.w(`${this.ID} can not parse content for ${request.context}. parse failed: ${e?.message}`);
     }).finally(() => {
@@ -328,6 +332,7 @@ export struct Markdown {
       Stack({ alignContent: Alignment.TopStart }) {
         FragmentComponent({
           node: this.program?.document, area: this.area, controller: this.fragmentController,
+          renderRevision: this.finalizationRevision,
           onFragmentComponentAfterAboutToAppear: () => {
             this.fragmentComponentTypingReady = true;
             log.i(`${this.ID} on typing will ready`);

@@ -137,26 +137,32 @@ export class Node extends Event {
   token?: Token;
 
   private _hash?: string;
+  private _localHash?: string;
   get hash() {
     return this._hash;
   }
+  get localHash() {
+    return this._localHash;
+  }
   createHash(): string | undefined {
-    const hashList: string[] = [];
+    const localHashList: string[] = [];
     //  this
     do {
       const hash = this.createThisHash();
       if (hash) {
-        hashList.push(hash);
+        localHashList.push(hash);
       }
     } while (0);
     //  children
     do {
       const hash = this.first?.deref()?.createHash();
       if (hash) {
-        hashList.push(hash);
+        localHashList.push(hash);
       }
     } while (0);
+    this._localHash = localHashList.length > 0 ? MDUuid.md5(localHashList.join('_')) : undefined;
     //  brother
+    const hashList: string[] = localHashList.slice();
     do {
       const hash = this.next?.deref()?.createHash();
       if (hash) {

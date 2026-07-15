@@ -32,6 +32,7 @@ export struct EmbedComponent {
   }
 
   @Param node?: Node = undefined;
+  @Param renderRevision: number = 0;
   @Require @Param @Once area: IMDArea = {};
   @Param @Once styles?: StyledValue[] = undefined;
   @Param @Once controller?: EmbedComponentController = undefined;
@@ -57,7 +58,7 @@ export struct EmbedComponent {
         }
         this.controller!.typing.mode = () => mode;
         if (mode === ETypingMode.Update) {
-          this.attach4update(mode, content);
+          this.attach4update(content);
         } else {
           this.attach4typing(mode, content);
         }
@@ -69,11 +70,17 @@ export struct EmbedComponent {
     const node = monitor.value<Node>();
     if (node) {
       if (node.now?.hash !== node.before?.hash) {
-        this.attach4update(ETypingMode.Update, node.now);
+        this.attach4update(node.now);
       }
     } else {
       this.layers = [];
       this.content = StyledObject.empty();
+    }
+  }
+  @Monitor('renderRevision') onRenderRevisionChange(monitor: IMonitor) {
+    const revision = monitor.value<number>();
+    if (revision?.now !== revision?.before) {
+      this.attach4normal(this.node);
     }
   }
   private attach4normal(node?: Node) {
@@ -81,10 +88,12 @@ export struct EmbedComponent {
       return;
     }
     this.layers = [];
+    const likelyUtil = new EmbedComponentLikelyUtil();
     const content = StyledObject.root(this.area, this.styles)
       .on<IStyledObjectAppendEvent>(EStyledObjectEvent.DidAppend, event => {
         if (event.target.type === EStyledObject.Embed) {
           const embed = event.target as StyledEmbed;
+          embed.likelyKey = `${embed.embedOption.builderType}_${likelyUtil.index(embed.embedOption.builderType)}`;
           this.layers.push(embed);
         }
       })
@@ -102,72 +111,54 @@ export struct EmbedComponent {
       },
     });
     this.content = content;
+    this.verifyLayerAttachments(content, this.layers);
   }
-  private attach4update(mode: ETypingMode, node?: Node) {
+  private attach4update(node?: Node) {
     if (!node) {
       this.layers = [];
       this.content = StyledObject.empty();
       return;
     }
-    const currentLayers: Record<string, StyledEmbed> = {};
+    const previousLayers: StyledEmbed[] = this.layers.slice();
+    const nextLayers: StyledEmbed[] = [];
+    const likelyUtil = new EmbedComponentLikelyUtil();
     const content = StyledObject.root(this.area, this.styles)
       .on<IStyledObjectAppendEvent>(EStyledObjectEvent.DidAppend, event => {
         if (event.target.type === EStyledObject.Embed) {
           const embed = event.target as StyledEmbed;
-          let existedIndex: number | undefined = undefined;
-          let existed: StyledEmbed | undefined = undefined;
-          this.layers.forEach((ele, index) => {
-            if (ele.likelyKey === embed.likelyKey) {
-              existedIndex = index;
-              existed = ele;
-            }
-          });
-          if (existed !== undefined && existedIndex !== undefined) {
-            embed.reuse(existed);
-            (existed as StyledEmbed).embedController.updateEmbed(embed);
-          } else {
-            this.layers.push(embed);
-          }
-          currentLayers[embed.likelyKey] = embed;
+          embed.likelyKey = `${embed.embedOption.builderType}_${likelyUtil.index(embed.embedOption.builderType)}`;
+          nextLayers.push(embed);
         }
       })
       .on<IStyledObjectReplaceStyleEvent>(EStyledObjectEvent.DidReplaceStyle, () => {
         this.textComponentController.refresh();
       });
-    const likelyUtil = new EmbedComponentLikelyUtil();
     Styled.create({
       node,
     })?.build({
       theme: this.theme,
       engine: this.sharedEngine,
       didCreateStyled: (styled) => {
-        if (styled.type === EStyledObject.Embed) {
-          const embed = styled as StyledEmbed;
-          embed.likelyKey = `${embed.embedOption.builderType}_${likelyUtil.index(embed.embedOption.builderType)}`;
-        }
         content.attach(styled);
       },
     });
-    this.applyNormalUpdateContent(content);
-    do {
-      //  clear unused layers
-      let index = 0;
-      while (index < this.layers.length) {
-        const embed = this.layers[index];
-        const current = currentLayers[embed.likelyKey];
-        if (current) {
-          this.layers.splice(index, 1, current);
-          index++;
-        } else {
-          this.layers.splice(index, 1);
-        }
+    nextLayers.forEach((embed: StyledEmbed) => {
+      const existed: StyledEmbed | undefined = previousLayers.find((candidate: StyledEmbed): boolean => {
+        return candidate.likelyKey === embed.likelyKey;
+      });
+      if (existed !== undefined) {
+        embed.reuse(existed);
+        existed.embedController.updateEmbed(embed);
       }
-    } while (0);
+    });
+    this.applyNormalUpdateContent(content, previousLayers.length, nextLayers.length);
+    this.layers = nextLayers;
+    this.verifyLayerAttachments(this.content, this.layers);
   }
-  private applyNormalUpdateContent(content: StyledObject): void {
+  private applyNormalUpdateContent(content: StyledObject, currentEmbedCount: number, nextEmbedCount: number): void {
     const currentText: string = this.content.getString();
     const nextText: string = content.getString();
-    if (currentText.length > 0 && nextText.length > currentText.length && nextText.indexOf(currentText) === 0) {
+    if (canAppendNormalUpdate(currentText, nextText, currentEmbedCount, nextEmbedCount)) {
       try {
         const delta: StyledString = content.subStyledString(currentText.length, nextText.length - currentText.length);
         this.content.appendStyledString(delta);
@@ -178,6 +169,13 @@ export struct EmbedComponent {
       }
     }
     this.content = content;
+  }
+  private verifyLayerAttachments(content: StyledObject, layers: StyledEmbed[]): void {
+    layers.forEach((layer: StyledEmbed): void => {
+      if (!layer.attached || layer.currentRoot !== content) {
+        log.e(`${this.ID} embed ${layer.likelyKey} is detached from rendered content`);
+      }
+    });
   }
   private attach4typing(mode: ETypingMode, node?: Node) {
     if (!this.controller) {
@@ -329,6 +327,16 @@ export struct EmbedComponent {
       }, (layer: StyledEmbed) => layer.likelyKey)
     }
   }
+}
+
+export function canAppendNormalUpdate(
+  currentText: string,
+  nextText: string,
+  currentEmbedCount: number,
+  nextEmbedCount: number,
+): boolean {
+  return currentEmbedCount === 0 && nextEmbedCount === 0 && currentText.length > 0 &&
+    nextText.length > currentText.length && nextText.indexOf(currentText) === 0;
 }
 
 export class EmbedComponentController {

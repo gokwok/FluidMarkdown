@@ -1,6 +1,6 @@
 {
   "name": "fluid-markdown",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Streaming Markdown engine for AI chat on mobile.",
   "keywords": [ "markdown", "chat", "native", "stream-output", "ai", "ios", "android", "harmonyos" ],
   "homepage": "https://github.com/antgroup/FluidMarkdown",

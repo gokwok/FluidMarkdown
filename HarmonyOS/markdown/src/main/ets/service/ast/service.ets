@@ -342,31 +342,31 @@ export class AstService extends Service {
     const ignoreNodes: ENode[] = [ ENode.FootnoteDef ];
     log.i(`${this.ID} will prepare ast fragment. blockMax: ${this.engine?.deref()?.ctx?.fragmentBlockMax}`);
     const fragments: Fragment[] = [];
-    const dequeue = () => {
-      let fragment = fragments.slice(-1).pop();
-      if (!fragment) {
-        fragment = new Fragment();
-        fragments.push(fragment);
-      } else {
-        let blockCount: number = 0;
-        let child = fragment.first?.deref();
-        while (child) {
-          if (child.layout === ELayout.Block && !ignoreNodes.includes(child.type)) {
-            blockCount++;
-          }
-          child = child.next?.deref();
-        }
-        if (blockCount >= blockMax) {
-          fragment = new Fragment();
-          fragments.push(fragment);
-        }
-      }
+    let currentFragment: Fragment | undefined = undefined;
+    let currentBlockCount: number = 0;
+    const createFragment = (): Fragment => {
+      const fragment = new Fragment();
+      fragments.push(fragment);
       return fragment;
     };
     let node = program.document.first?.deref();
     while (node) {
-      const fragment = dequeue();
-      fragment.append(node);
+      if (isStandaloneEmbedBlock(node)) {
+        const fragment: Fragment = createFragment();
+        fragment.append(node);
+        currentFragment = undefined;
+        currentBlockCount = 0;
+      } else {
+        const isCountedBlock: boolean = node.layout === ELayout.Block && !ignoreNodes.includes(node.type);
+        if (currentFragment === undefined || (isCountedBlock && currentBlockCount >= blockMax)) {
+          currentFragment = createFragment();
+          currentBlockCount = 0;
+        }
+        currentFragment.append(node);
+        if (isCountedBlock) {
+          currentBlockCount += 1;
+        }
+      }
       node = program.document.first?.deref();
     }
     fragments.forEach(ele => {
@@ -464,6 +464,10 @@ export class AstService extends Service {
       }
     }
   }
+}
+
+export function isStandaloneEmbedBlock(node: Node): boolean {
+  return node.type === ENode.Table || (node.type === ENode.Code && node.layout === ELayout.Block);
 }
 
 export interface IFragment {
